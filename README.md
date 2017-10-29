@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Stein Variational Gradient Descent (SVGD)
 SVGD is a general purpose variational inference algorithm that forms a natural counterpart of gradient descent for optimization. SVGD iteratively transports a set of particles to match with the target distribution, by applying a form of functional gradient descent that minimizes the KL divergence.
 
@@ -82,4 +81,3 @@ These were trained for 10000 iterations with minibatch size=100 on a GTX 970 GPU
 - https://github.com/ikostrikov/TensorFlow-VAE-GAN-DRAW (wish I had found this earlier)
 - [Video Lecture on Variational Autoencoders and Image Generation]( https://www.youtube.com/watch?v=P78QYjWh5sM&list=PLE6Wd9FR--EfW8dtjAuPoTuPcqmOV53Fu&index=3)
 
->>>>>>> b604a064be4b02999632f8d616f18caaf3e6a567
