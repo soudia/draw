@@ -27,6 +27,7 @@ Qiang Liu and Dilin Wang. [Stein Variational Gradient Descent (SVGD): A General 
 ## Feedback
 Feedback is greatly appreciated. If you have any questions, comments, issues or anything else really, [shoot me an email](mailto:dilin.wang.gr@dartmouth.edu).
 
+
 All rights reserved.
 =======
 # draw
