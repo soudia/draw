@@ -1,0 +1,12 @@
+keras
+numpy
+requests
+seaborn
+scipy
+tensorflow-gpu
+tqdm
+matplotlib
+pandas
+imageio
+moviepy
+xxhash
