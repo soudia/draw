@@ -132,7 +132,7 @@ class svgd_bayesnn:
                 grad_theta[i,:] = self.pack_weights(dw1, db1, dw2, db2, dloggamma, dloglambda)
                 
             # calculating the kernel matrix
-            kxy, dxkxy = self.svgd_kernel(h=-1)  
+            kxy, dxkxy = self.svgd_kernel(h=-1)
             grad_theta = (np.matmul(kxy, grad_theta) + dxkxy) / self.M   # \Phi(x)
             
             # adagrad 
