@@ -1,4 +1,7 @@
-""" Stein Variational Gradient Descent """
+""" Stein Variational Gradient Descent
+    Reference paper: https://arxiv.org/pdf/1608.04471.pdf
+"""
+
 
 import numpy as np
 from scipy.spatial.distance import pdist, squareform
@@ -13,8 +16,9 @@ class SVGD(object):
     def svgd_kernel(self, theta, h=-1):
         """ Stein Variational Gradient Descent Kernel
             Arg:
-                theta: normalized latent code samples (subtract mean and divided by variance)
-                h: Radial Basis Kernel term (h) value
+                theta: mean-centered latent code samples (subtract mean)
+                h: Radial Basis Kernel term (h) value (in this case it's
+                   the standard deviation)
         """
         sq_dist = pdist(theta)
         pairwise_dists = squareform(sq_dist)**2  # pairwise distance in matrix form
@@ -22,11 +26,13 @@ class SVGD(object):
             h = np.median(pairwise_dists)
             h = np.sqrt(0.5 * h / np.log(theta.shape[0]+1))
 
-        # compute the rbf kernel
+        # Compute the rbf kernel: exp(-||X_i - X_j|| / (2 * h^2)) for all i, j
         Kxy = np.exp(-pairwise_dists / h**2 / 2)
 
-        dxkxy = -np.matmul(Kxy, theta)  # derivative of Kxy with respect to x
+        dxkxy = -np.matmul(Kxy, theta)  # derivative of the kernel Kxy with respect to x
         sumkxy = np.sum(Kxy, axis=1)
+
+        # Check the paper for more context https://arxiv.org/pdf/1608.04471.pdf Delta log(p)
         for i in range(theta.shape[1]):
             dxkxy[:, i] = dxkxy[:, i] + np.multiply(theta[:, i], sumkxy)
         dxkxy = dxkxy / (h**2)
@@ -38,6 +44,13 @@ class SVGD(object):
             raise ValueError('x0 or lnprob cannot be None!')
 
         theta = np.copy(x0)
+
+        # TODO: Try Adam here using tensorflow
+
+        # TODO: Mean-center theta, and compute the mean
+
+        # TODO: When updating theta, make sure to re-add the mean. Technically, theta as it is should
+        # but we never know.
 
         # adagrad with momentum
         fudge_factor = 1e-6
@@ -51,7 +64,7 @@ class SVGD(object):
             kxy, dxkxy = self.svgd_kernel(theta, h=-1)
             grad_theta = (np.matmul(kxy, lnpgrad) + dxkxy) / x0.shape[0]
 
-            # adagrad
+            # adagrad (this in fact is adadelta an extension of adagrad)
             if iter == 0:
                 historical_grad = historical_grad + grad_theta ** 2
             else:

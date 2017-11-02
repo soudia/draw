@@ -11,6 +11,7 @@ Author: Eric Jang
 
 import tensorflow as tf
 from tensorflow.examples.tutorials import mnist
+from utils.queue_reader import QueueReader
 import numpy as np
 import os
 
@@ -22,17 +23,17 @@ FLAGS = tf.flags.FLAGS
 # ***** MODEL PARAMETERS ****** #
 
 A, B = 28, 28  # image width,height
-img_size = B*A  # the canvas size
+img_size = B*A  # the canvas size TODO: This would be the input embedding size
 enc_size = 256  # number of hidden units / output size in LSTM
 dec_size = 256
 read_n = 5  # read glimpse grid width/height
 write_n = 5  # write glimpse grid width/height
 read_size = 2*read_n*read_n if FLAGS.read_attn else 2*img_size
 write_size = write_n*write_n if FLAGS.write_attn else img_size
-z_size = 10  # QSampler output size
+z_size = 10  # QSampler output size TODO: Try bigger size for the latent code
 T = 10  # MNIST generation sequence length
 batch_size = 100  # training minibatch size
-train_iters = 10000
+train_iters = 100  # 10000
 learning_rate = 1e-3  # learning rate for optimizer
 eps = 1e-8  # epsilon for numerical stability
 
@@ -41,7 +42,7 @@ eps = 1e-8  # epsilon for numerical stability
 DO_SHARE = None  # workaround for variable_scope(reuse=True)
 
 x = tf.placeholder(tf.float32, shape=(batch_size, img_size))  # input (batch_size * img_size)
-e = tf.random_normal((batch_size, z_size), mean=0, stddev=1)  # Qsampler noise
+e = tf.random_normal((batch_size, z_size), mean=0, stddev=1)  # Qsampler noise : TODO not needed
 lstm_enc = tf.contrib.rnn.LSTMCell(enc_size, state_is_tuple=True)  # encoder Op
 lstm_dec = tf.contrib.rnn.LSTMCell(dec_size, state_is_tuple=True)  # decoder Op
 
@@ -53,6 +54,7 @@ def linear(x, output_dim):
     return tf.matmul(x, w)+b
 
 
+# pylint: disable=E1129,E1130
 def filterbank(gx, gy, sigma2, delta, N):
     grid_i = tf.reshape(tf.cast(tf.range(N), tf.float32), [1, -1])
     mu_x = gx + (grid_i - N / 2 - 0.5) * delta  # eq 19
@@ -104,7 +106,7 @@ def read_attn(x, x_hat, h_dec_prev):
 read = read_attn if FLAGS.read_attn else read_no_attn
 
 
-# ****** ENCODE **** # 
+# ****** ENCODE **** #
 def encode(state, input):
     """
     run LSTM
@@ -220,37 +222,61 @@ train_op = optimizer.apply_gradients(grads)
 data_directory = os.path.join(FLAGS.data_dir, "mnist")
 if not os.path.exists(data_directory):
     os.makedirs(data_directory)
-train_data = mnist.input_data.read_data_sets(data_directory, one_hot=True).train  # binarized (0-1) mnist data
+# TODO: Add our embedding layer here
+# train_data = mnist.input_data.read_data_sets(data_directory, one_hot=True).train  # binarized (0-1) mnist data
 
 fetches = []
 fetches.extend([Lx, Lz, train_op])
 Lxs = [0]*train_iters
 Lzs = [0]*train_iters
 
-sess = tf.InteractiveSession()
-
 saver = tf.train.Saver()  # saves variables learned during training
-tf.global_variables_initializer().run()
+# tf.global_variables_initializer().run()
 # saver.restore(sess, "/tmp/adware/adwaremodel.ckpt") # to restore from model, uncomment this line
 
-for i in range(train_iters):
-    xtrain, _ = train_data.next_batch(batch_size)  # xtrain is (batch_size x img_size)
-    feed_dict = {x: xtrain}
-    results = sess.run(fetches, feed_dict)
-    Lxs[i], Lzs[i], _ = results
-    if i % 100 == 0:
-        print("iter=%d : Lx: %f Lz: %f" % (i, Lxs[i], Lzs[i]))
+data_directory = os.path.join(FLAGS.data_dir, 'test/')
 
-# ******* TRAINING FINISHED ******* #
+queue_reader = QueueReader(data_dir=data_directory, batch_size=batch_size, z_dim=img_size)
 
-canvases = sess.run(cs, feed_dict)  # generate some examples
-canvases = np.array(canvases)  # T x batch x img_size
+# coord = tf.train.Coordinator()
+with tf.train.MonitoredSession() as sess:
+    sess.graph._unsafe_unfinalize()
+    sess.run(tf.global_variables_initializer())
+    threads = tf.train.start_queue_runners(sess=sess)
+    xtrain = queue_reader.dequeue_many(1)
+    print("xtrain", xtrain['inputs'].shape)
 
-out_file = os.path.join(FLAGS.data_dir, "adware_data.npy")
-np.save(out_file, [canvases, Lxs, Lzs])
-print("Outputs saved in file: %s" % out_file)
+    for i in range(train_iters):
+        # xtrain, _ = train_data.next_batch(batch_size)  # xtrain is (batch_size x img_size)
+        # train = sess.run(xtrain)
+        train = sess.run(xtrain['inputs'])
+        train = sess.run(tf.reshape(train, shape=[-1, train.shape[3]]))
+        print("train", train)
 
-ckpt_file = os.path.join(FLAGS.data_dir, "adwaremodel.ckpt")
-print("Model saved in file: %s" % saver.save(sess, ckpt_file))
+        num_mini_batches = train.shape[0] // batch_size
+        mini_batches = tf.split(train, num_or_size_splits=num_mini_batches, axis=0)
+        for j in range(mini_batches):
+            feed_dict = {x: sess.run(mini_batches[j])}
+            results = sess.run(fetches, feed_dict)
+            Lxs[i], Lzs[i], _ = results
+            if i % 100 == 0:
+                print("iter=%d : Lx: %f Lz: %f" % (i, Lxs[i], Lzs[i]))
 
-sess.close()
+    # ******* TRAINING FINISHED ******* #
+
+    sess.run(tf.global_variables_initializer())
+    sess.run(tf.local_variables_initializer())
+
+    canvases = sess.run(cs, feed_dict)  # generate some examples
+    canvases = np.array(canvases)  # T x batch x img_size
+
+    out_file = os.path.join(FLAGS.data_dir, "adware_data.npy")
+    np.save(out_file, [canvases, Lxs, Lzs])
+    print("Outputs saved in file: %s" % out_file)
+
+    ckpt_file = os.path.join(FLAGS.data_dir, "adwaremodel.ckpt")
+    print("Model saved in file: %s" % saver.save(sess, ckpt_file))
+
+    # coord.request_stop()
+    # coord.join(threads)
+    sess.close()
