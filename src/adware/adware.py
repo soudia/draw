@@ -33,7 +33,7 @@ write_size = write_n*write_n if FLAGS.write_attn else img_size
 z_size = 10  # QSampler output size TODO: Try bigger size for the latent code
 T = 10  # MNIST generation sequence length
 batch_size = 100  # training minibatch size
-train_iters = 100  # 10000
+train_iters = 200  # 10000
 learning_rate = 1e-3  # learning rate for optimizer
 eps = 1e-8  # epsilon for numerical stability
 
@@ -191,6 +191,7 @@ def binary_crossentropy(t, o):
 
 
 # reconstruction term appears to have been collapsed down to a single scalar value (rather than one per item in minibatch)
+# In my case, x_recons will be the product of z and w2 where z is obtained by computing relu(x, w1, b1)
 x_recons = tf.nn.sigmoid(cs[-1])
 
 # after computing binary cross entropy, sum across features then take the mean of those sums across minibatches
@@ -202,6 +203,7 @@ for t in range(T):
     mu2 = tf.square(mus[t])
     sigma2 = tf.square(sigmas[t])
     logsigma = logsigmas[t]
+    # TODO: This would change. See equation 11 in https://arxiv.org/pdf/1502.04623v2.pdf
     kl_terms[t] = 0.5*tf.reduce_sum(mu2+sigma2-2*logsigma, 1)-.5  # each kl term is (1xminibatch)
 KL = tf.add_n(kl_terms)  # this is 1xminibatch, corresponding to summing kl_terms from 1:T
 Lz = tf.reduce_mean(KL)  # average over minibatches
@@ -216,6 +218,14 @@ for i, (g, v) in enumerate(grads):
     if g is not None:
         grads[i] = (tf.clip_by_norm(g, 5), v)  # clip gradients
 train_op = optimizer.apply_gradients(grads)
+
+
+def get_session(sess):
+    session = sess
+    while type(session).__name__ != 'Session':
+        session = session._sess
+    return session
+
 
 # ********* RUN TRAINING ********** #
 
@@ -238,7 +248,6 @@ data_directory = os.path.join(FLAGS.data_dir, 'test/')
 
 queue_reader = QueueReader(data_dir=data_directory, batch_size=batch_size, z_dim=img_size)
 
-# coord = tf.train.Coordinator()
 with tf.train.MonitoredSession() as sess:
     sess.graph._unsafe_unfinalize()
     sess.run(tf.global_variables_initializer())
@@ -251,11 +260,10 @@ with tf.train.MonitoredSession() as sess:
         # train = sess.run(xtrain)
         train = sess.run(xtrain['inputs'])
         train = sess.run(tf.reshape(train, shape=[-1, train.shape[3]]))
-        print("train", train)
 
         num_mini_batches = train.shape[0] // batch_size
         mini_batches = tf.split(train, num_or_size_splits=num_mini_batches, axis=0)
-        for j in range(mini_batches):
+        for j in range(len(mini_batches)):
             feed_dict = {x: sess.run(mini_batches[j])}
             results = sess.run(fetches, feed_dict)
             Lxs[i], Lzs[i], _ = results
@@ -275,8 +283,4 @@ with tf.train.MonitoredSession() as sess:
     print("Outputs saved in file: %s" % out_file)
 
     ckpt_file = os.path.join(FLAGS.data_dir, "adwaremodel.ckpt")
-    print("Model saved in file: %s" % saver.save(sess, ckpt_file))
-
-    # coord.request_stop()
-    # coord.join(threads)
-    sess.close()
+    print("Model saved in file: %s" % saver.save(get_session(sess), ckpt_file))

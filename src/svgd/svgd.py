@@ -16,7 +16,7 @@ class SVGD(object):
     def svgd_kernel(self, theta, h=-1):
         """ Stein Variational Gradient Descent Kernel
             Arg:
-                theta: mean-centered latent code samples (subtract mean)
+                theta: Particles (consisting of weights, biais, etc.)
                 h: Radial Basis Kernel term (h) value (in this case it's
                    the standard deviation)
         """

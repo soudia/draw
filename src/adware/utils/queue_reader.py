@@ -5,7 +5,7 @@ from sklearn.feature_extraction.text import CountVectorizer
 
 
 class QueueReader(object):
-    """ Create  batches that it stores in a Tensor flow queue for easy consumption. """
+    """ Creates batches that it stores in a Tensor flow queue for easy consumption. """
     def __init__(self, data_dir, batch_size=128, max_queue_size=128, z_dim=100, sess=tf.Session()):
         """ Initializer
             :param data_dir: Directory that contains the training files (absolute path)
@@ -49,7 +49,7 @@ class QueueReader(object):
 
         enqueue = queue.enqueue({'inputs': embeddings})
 
-        num_threads = 1
+        num_threads = 10
 
         runner = tf.train.QueueRunner(queue, [enqueue] * num_threads)
         tf.train.add_queue_runner(runner)
