@@ -33,9 +33,9 @@ write_n = 5  # write glimpse grid width/height
 read_size = 2*read_n*read_n if FLAGS.read_attn else 2*img_size
 write_size = write_n*write_n if FLAGS.write_attn else img_size
 z_size = 10  # QSampler output size TODO: Try bigger size for the latent code
-T = 10  # MNIST generation sequence length
+T = 1  # MNIST generation sequence length
 batch_size = 100  # training minibatch size
-train_iters = 10  # 10000
+train_iters = 20  # 10000
 learning_rate = 1e-3  # learning rate for optimizer
 eps = 1e-8  # epsilon for numerical stability
 
@@ -57,7 +57,6 @@ lstm_dec = tf.contrib.rnn.LSTMCell(dec_size, state_is_tuple=True)  # decoder Op
 
 # pylint: disable=E1129
 particles = tf.random_normal(shape=(batch_size, num_particles, dim_particle), stddev=1.0)
-noisy_h_enc = tf.zeros(shape=(batch_size, enc_size + eta_dim))
 noise = tf.random_normal(shape=(batch_size, eta_dim), stddev=0.01)
 
 
@@ -147,10 +146,16 @@ def sampleQ(h_enc):
     return (mu + sigma*e, mu, logsigma, sigma)
 
 
-def vae_sampleQ(h_enc, particles):
-    mu, sigma = tf.nn.moments(particles, axes=[1])
-    logsigma = tf.log(sigma)
-    return (mu + sigma*e, mu, logsigma, sigma)
+def vae_sampleQ(h_enc, particles, iter):
+    noisy_h_enc = tf.concat([h_enc, noise], axis=1)
+    with tf.variable_scope("vae_sampling", reuse=None):
+        # particles_ = particles just for testing pred particles is equal to particles
+        particles, _ = vae_svgd.recognition_model(noisy_h_enc, particles, num_iter_stein)
+        # print(tf.equal(particles, particles_, name="comparison")) test didn't pass
+    with tf.variable_scope("moments", reuse=DO_SHARE):
+        mu, sigma = tf.nn.moments(particles, axes=[1])
+        logsigma = tf.log(sigma)
+    return (mu + sigma*e, mu, logsigma, sigma)  # TODO
 
 
 # ******* DECODER ****** #
@@ -197,9 +202,7 @@ for t in range(T):
     x_hat = x - tf.sigmoid(c_prev)  # error image
     r = read(x, x_hat, h_dec_prev)
     h_enc, enc_state = encode(enc_state, tf.concat([r, h_dec_prev], 1))
-    noisy_h_enc = tf.concat([h_enc, noise], axis=1)
-    particles, _ = vae_svgd.recognition_model(noisy_h_enc, particles, num_iter_stein)
-    z, mus[t], logsigmas[t], sigmas[t] = vae_sampleQ(h_enc, particles)
+    z, mus[t], logsigmas[t], sigmas[t] = vae_sampleQ(h_enc, particles, t)
     # z, mus[t], logsigmas[t], sigmas[t] = sampleQ(h_enc)
     h_dec, dec_state = decode(dec_state, z)
     cs[t] = c_prev+write(h_dec)  # store results
@@ -275,40 +278,34 @@ with tf.train.MonitoredSession() as sess:
     sess.graph._unsafe_unfinalize()
     sess.run(tf.global_variables_initializer())
     threads = tf.train.start_queue_runners(sess=sess)
-    xtrain = queue_reader.dequeue_many(1)
-    print("xtrain", xtrain['inputs'].shape)
+    xtrain = queue_reader.dequeue_many(3)
 
     graph = tf.get_default_graph()
-
     for i in range(train_iters):
         # xtrain, _ = train_data.next_batch(batch_size)  # xtrain is (batch_size x img_size)
         # train = sess.run(xtrain)
         train = sess.run(xtrain['inputs'])
         train = sess.run(tf.reshape(train, shape=[-1, train.shape[3]]))
 
-        cost = graph.get_tensor_by_name('metrics/mse:0')
-        rec_model_train_op = graph.get_operation_by_name('optimization/train_op')
-
-        X = graph.get_tensor_by_name('X:0')
-        y = graph.get_tensor_by_name('y:0')
+        mse = graph.get_tensor_by_name('vae_sampling/metrics/mse:0')
+        vae_train_op = graph.get_operation_by_name('vae_sampling/optimization/train_op')
 
         num_mini_batches = train.shape[0] // batch_size
         mini_batches = tf.split(train, num_or_size_splits=num_mini_batches, axis=0)
-        noisy_h_enc = tf.zeros(shape=(batch_size, enc_size + eta_dim))
-        particles = tf.random_normal(shape=(batch_size, num_particles, dim_particle), stddev=1.0)
         for j in range(len(mini_batches)):
             feed_dict_ = {x: sess.run(mini_batches[j])}
             results = sess.run(fetches, feed_dict_)
             Lxs[i], Lzs[i], _ = results
-            if i % 100 == 0:
-                print("iter=%d : Lx: %f Lz: %f" % (i, Lxs[i], Lzs[i]))
             for epoch in range(vae_svgd.num_epoch):
-                _, loss = sess.run([rec_model_train_op, cost],
-                                   feed_dict={X: sess.run(noisy_h_enc),
-                                              y: sess.run(particles)})
-                if epoch // vae_svgd.num_epoch >= 1:
-                    print("Epoch = {}, recognition model loss = {:.7f}".format
-                          (epoch + 1, 100. * loss))
+                _, loss = sess.run([vae_train_op, mse], feed_dict=feed_dict_)
+                # if epoch % vae_svgd.num_epoch == 0:
+                #     print("Epoch = {}, recognition model loss = {:.7f}".format
+                #           (epoch + 1, 100. * loss))
+                if i % 100 == 0 and epoch % 100 == 0:
+                    print("iter=%d - vae_iter=%d : Lx: %f Lz: %f rec. loss: %f"
+                          % (i, epoch, Lxs[i], Lzs[i], loss))
+                # compare = graph.get_tensor_by_name('vae_sampling/comparison:0')
+                # print(sess.run(compare, feed_dict=feed_dict_))
 
     # ******* TRAINING FINISHED ******* #
 
@@ -318,7 +315,6 @@ with tf.train.MonitoredSession() as sess:
     canvases = sess.run(cs, feed_dict_)  # generate some examples
     canvases = np.array(canvases)  # T x batch x img_size
 
-    print("Shapes", canvases.shape, len(Lxs), len(Lzs))
     out_file = os.path.join(FLAGS.data_dir, "adware_data.npy")
     np.save(out_file, [canvases, Lxs, Lzs])
     print("Outputs saved in file: %s" % out_file)
