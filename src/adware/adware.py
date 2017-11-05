@@ -15,6 +15,8 @@ from utils.queue_reader import QueueReader
 import numpy as np
 import os
 
+from src.svgd.vae_svgd import VariationalEncSVGD
+
 tf.flags.DEFINE_string("data_dir", "", "")
 tf.flags.DEFINE_boolean("read_attn", True, "enable attention for reader")
 tf.flags.DEFINE_boolean("write_attn", True, "enable attention for writer")
@@ -36,6 +38,8 @@ batch_size = 100  # training minibatch size
 train_iters = 200  # 10000
 learning_rate = 1e-3  # learning rate for optimizer
 eps = 1e-8  # epsilon for numerical stability
+
+vae_svgd = VariationalEncSVGD(n_hidden=10, num_epoch=10)
 
 # ******** BUILD MODEL ******* #
 
@@ -106,6 +110,8 @@ def read_attn(x, x_hat, h_dec_prev):
 read = read_attn if FLAGS.read_attn else read_no_attn
 
 
+
+
 # ****** ENCODE **** #
 def encode(state, input):
     """
@@ -131,6 +137,10 @@ def sampleQ(h_enc):
         logsigma = linear(h_enc, z_size)
         sigma = tf.exp(logsigma)
     return (mu + sigma*e, mu, logsigma, sigma)
+
+
+def vae_sampleQ(h_enc, particles, num_iter, eta_dim):
+    pass
 
 
 # ******* DECODER ****** #
