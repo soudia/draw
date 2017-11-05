@@ -41,7 +41,7 @@ class VariationalEncSVGD(SVGD):
         yhat = tf.tensordot(h, w_2, axes=[[1], [0]])
         return yhat
 
-    def recognition_model(self, noisy_h_enc, particles, num_iter):
+    def recognition_model(self, noisy_h_enc, particles, num_iter, time_step):
         ''' Recognition model
             Args:
                 h_enc:
@@ -69,7 +69,7 @@ class VariationalEncSVGD(SVGD):
         with tf.name_scope("metrics"):
             cost = tf.reduce_mean(tf.squared_difference(particles, yhat), name='mse')
 
-        with tf.name_scope("optimization"):
+        with tf.name_scope("optimization_" + time_step):
             optimizer = tf.train.AdamOptimizer(learning_rate=self.stepsize)
             gradients = optimizer.compute_gradients(cost)
             train_op = optimizer.apply_gradients(gradients, global_step=None, name='train_op')

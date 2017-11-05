@@ -146,11 +146,11 @@ def sampleQ(h_enc):
     return (mu + sigma*e, mu, logsigma, sigma)
 
 
-def vae_sampleQ(h_enc, particles, iter):
+def vae_sampleQ(h_enc, particles, iter, time_step):
     noisy_h_enc = tf.concat([h_enc, noise], axis=1)
     with tf.variable_scope("vae_sampling", reuse=None):
         # particles_ = particles just for testing pred particles is equal to particles
-        particles, _ = vae_svgd.recognition_model(noisy_h_enc, particles, num_iter_stein)
+        particles, _ = vae_svgd.recognition_model(noisy_h_enc, particles, iter, time_step)
         # print(tf.equal(particles, particles_, name="comparison")) test didn't pass
     with tf.variable_scope("moments", reuse=DO_SHARE):
         mu, sigma = tf.nn.moments(particles, axes=[1])
@@ -202,7 +202,7 @@ for t in range(T):
     x_hat = x - tf.sigmoid(c_prev)  # error image
     r = read(x, x_hat, h_dec_prev)
     h_enc, enc_state = encode(enc_state, tf.concat([r, h_dec_prev], 1))
-    z, mus[t], logsigmas[t], sigmas[t] = vae_sampleQ(h_enc, particles, t)
+    z, mus[t], logsigmas[t], sigmas[t] = vae_sampleQ(h_enc, particles, str(t))
     # z, mus[t], logsigmas[t], sigmas[t] = sampleQ(h_enc)
     h_dec, dec_state = decode(dec_state, z)
     cs[t] = c_prev+write(h_dec)  # store results
@@ -258,7 +258,6 @@ def get_session(sess):
 data_directory = os.path.join(FLAGS.data_dir, "mnist")
 if not os.path.exists(data_directory):
     os.makedirs(data_directory)
-# TODO: Add our embedding layer here
 # train_data = mnist.input_data.read_data_sets(data_directory, one_hot=True).train  # binarized (0-1) mnist data
 
 fetches = []
@@ -278,7 +277,7 @@ with tf.train.MonitoredSession() as sess:
     sess.graph._unsafe_unfinalize()
     sess.run(tf.global_variables_initializer())
     threads = tf.train.start_queue_runners(sess=sess)
-    xtrain = queue_reader.dequeue_many(3)
+    xtrain = queue_reader.dequeue_many(3)  # TODO
 
     graph = tf.get_default_graph()
     for i in range(train_iters):
@@ -298,9 +297,6 @@ with tf.train.MonitoredSession() as sess:
             Lxs[i], Lzs[i], _ = results
             for epoch in range(vae_svgd.num_epoch):
                 _, loss = sess.run([vae_train_op, mse], feed_dict=feed_dict_)
-                # if epoch % vae_svgd.num_epoch == 0:
-                #     print("Epoch = {}, recognition model loss = {:.7f}".format
-                #           (epoch + 1, 100. * loss))
                 if i % 100 == 0 and epoch % 100 == 0:
                     print("iter=%d - vae_iter=%d : Lx: %f Lz: %f rec. loss: %f"
                           % (i, epoch, Lxs[i], Lzs[i], loss))
