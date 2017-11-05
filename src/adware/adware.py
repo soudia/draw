@@ -15,7 +15,7 @@ from utils.queue_reader import QueueReader
 import numpy as np
 import os
 
-from src.svgd.vae_svgd import VariationalEncSVGD
+from svgd.vae_svgd import VariationalEncSVGD
 
 tf.flags.DEFINE_string("data_dir", "", "")
 tf.flags.DEFINE_boolean("read_attn", True, "enable attention for reader")
@@ -35,11 +35,16 @@ write_size = write_n*write_n if FLAGS.write_attn else img_size
 z_size = 10  # QSampler output size TODO: Try bigger size for the latent code
 T = 10  # MNIST generation sequence length
 batch_size = 100  # training minibatch size
-train_iters = 200  # 10000
+train_iters = 10  # 10000
 learning_rate = 1e-3  # learning rate for optimizer
 eps = 1e-8  # epsilon for numerical stability
 
-vae_svgd = VariationalEncSVGD(n_hidden=10, num_epoch=10)
+num_particles = 10  # number of particles to consider for SVGD (M)
+dim_particle = z_size  # dimension of a particle
+num_iter_stein = 10  # number of iterations for SVGD
+eta_dim = 2  # dimension of recognition noise model parameters
+
+vae_svgd = VariationalEncSVGD(n_hidden=10, num_epoch=1)
 
 # ******** BUILD MODEL ******* #
 
@@ -49,6 +54,11 @@ x = tf.placeholder(tf.float32, shape=(batch_size, img_size))  # input (batch_siz
 e = tf.random_normal((batch_size, z_size), mean=0, stddev=1)  # Qsampler noise : TODO not needed
 lstm_enc = tf.contrib.rnn.LSTMCell(enc_size, state_is_tuple=True)  # encoder Op
 lstm_dec = tf.contrib.rnn.LSTMCell(dec_size, state_is_tuple=True)  # decoder Op
+
+# pylint: disable=E1129
+particles = tf.random_normal(shape=(batch_size, num_particles, dim_particle), stddev=1.0)
+noisy_h_enc = tf.zeros(shape=(batch_size, enc_size + eta_dim))
+noise = tf.random_normal(shape=(batch_size, eta_dim), stddev=0.01)
 
 
 def linear(x, output_dim):
@@ -110,8 +120,6 @@ def read_attn(x, x_hat, h_dec_prev):
 read = read_attn if FLAGS.read_attn else read_no_attn
 
 
-
-
 # ****** ENCODE **** #
 def encode(state, input):
     """
@@ -139,8 +147,11 @@ def sampleQ(h_enc):
     return (mu + sigma*e, mu, logsigma, sigma)
 
 
-def vae_sampleQ(h_enc, particles, num_iter, eta_dim):
-    pass
+def vae_sampleQ(h_enc, particles):
+    mu, sigma = tf.nn.moments(particles, axes=[1])
+    logsigma = tf.log(sigma)
+    print('mu shape', mu.shape)
+    return (mu + sigma*e, mu, logsigma, sigma)
 
 
 # ******* DECODER ****** #
@@ -187,7 +198,10 @@ for t in range(T):
     x_hat = x - tf.sigmoid(c_prev)  # error image
     r = read(x, x_hat, h_dec_prev)
     h_enc, enc_state = encode(enc_state, tf.concat([r, h_dec_prev], 1))
-    z, mus[t], logsigmas[t], sigmas[t] = sampleQ(h_enc)
+    noisy_h_enc = tf.concat([h_enc, noise], axis=1)
+    particles, _ = vae_svgd.recognition_model(noisy_h_enc, particles, num_iter_stein)
+    z, mus[t], logsigmas[t], sigmas[t] = vae_sampleQ(h_enc, particles)
+    # z, mus[t], logsigmas[t], sigmas[t] = sampleQ(h_enc)
     h_dec, dec_state = decode(dec_state, z)
     cs[t] = c_prev+write(h_dec)  # store results
     h_dec_prev = h_dec
@@ -265,20 +279,36 @@ with tf.train.MonitoredSession() as sess:
     xtrain = queue_reader.dequeue_many(1)
     print("xtrain", xtrain['inputs'].shape)
 
+    graph = tf.get_default_graph()
+
     for i in range(train_iters):
         # xtrain, _ = train_data.next_batch(batch_size)  # xtrain is (batch_size x img_size)
         # train = sess.run(xtrain)
         train = sess.run(xtrain['inputs'])
         train = sess.run(tf.reshape(train, shape=[-1, train.shape[3]]))
 
+        cost = graph.get_tensor_by_name('metrics/mse:0')
+        train_op = graph.get_operation_by_name('optimization/train_op')
+
+        X = graph.get_tensor_by_name('X:0')
+        y = graph.get_tensor_by_name('y:0')
+
         num_mini_batches = train.shape[0] // batch_size
         mini_batches = tf.split(train, num_or_size_splits=num_mini_batches, axis=0)
+        noisy_h_enc = tf.zeros(shape=(batch_size, enc_size + eta_dim))
+        particles = tf.random_normal(shape=(batch_size, num_particles, dim_particle), stddev=1.0)
         for j in range(len(mini_batches)):
             feed_dict = {x: sess.run(mini_batches[j])}
             results = sess.run(fetches, feed_dict)
             Lxs[i], Lzs[i], _ = results
             if i % 100 == 0:
                 print("iter=%d : Lx: %f Lz: %f" % (i, Lxs[i], Lzs[i]))
+            for epoch in range(vae_svgd.num_epoch):
+                _, loss = sess.run([train_op, cost],
+                                   feed_dict={X: sess.run(noisy_h_enc),
+                                              y: sess.run(particles)})
+                print("Epoch = {}, recognition model loss = {:.7f}".format
+                      (epoch + 1, 100. * loss))
 
     # ******* TRAINING FINISHED ******* #
 
