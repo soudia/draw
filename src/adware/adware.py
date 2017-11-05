@@ -15,7 +15,7 @@ from utils.queue_reader import QueueReader
 import numpy as np
 import os
 
-from src.svgd.vae_svgd import VariationalEncSVGD
+# from src.svgd.vae_svgd import VariationalEncSVGD
 
 tf.flags.DEFINE_string("data_dir", "", "")
 tf.flags.DEFINE_boolean("read_attn", True, "enable attention for reader")
@@ -35,11 +35,11 @@ write_size = write_n*write_n if FLAGS.write_attn else img_size
 z_size = 10  # QSampler output size TODO: Try bigger size for the latent code
 T = 10  # MNIST generation sequence length
 batch_size = 100  # training minibatch size
-train_iters = 200  # 10000
+train_iters = 20  # 10000
 learning_rate = 1e-3  # learning rate for optimizer
 eps = 1e-8  # epsilon for numerical stability
 
-vae_svgd = VariationalEncSVGD(n_hidden=10, num_epoch=10)
+# vae_svgd = VariationalEncSVGD(n_hidden=10, num_epoch=10)
 
 # ******** BUILD MODEL ******* #
 
@@ -287,6 +287,7 @@ with tf.train.MonitoredSession() as sess:
 
     canvases = sess.run(cs, feed_dict)  # generate some examples
     canvases = np.array(canvases)  # T x batch x img_size
+    print(canvases.shape, len(Lxs), len(Lzs))
 
     out_file = os.path.join(FLAGS.data_dir, "adware_data.npy")
     np.save(out_file, [canvases, Lxs, Lzs])
