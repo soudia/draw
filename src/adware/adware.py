@@ -150,7 +150,6 @@ def sampleQ(h_enc):
 def vae_sampleQ(h_enc, particles):
     mu, sigma = tf.nn.moments(particles, axes=[1])
     logsigma = tf.log(sigma)
-    print('mu shape', mu.shape)
     return (mu + sigma*e, mu, logsigma, sigma)
 
 
@@ -288,7 +287,7 @@ with tf.train.MonitoredSession() as sess:
         train = sess.run(tf.reshape(train, shape=[-1, train.shape[3]]))
 
         cost = graph.get_tensor_by_name('metrics/mse:0')
-        train_op = graph.get_operation_by_name('optimization/train_op')
+        rec_model_train_op = graph.get_operation_by_name('optimization/train_op')
 
         X = graph.get_tensor_by_name('X:0')
         y = graph.get_tensor_by_name('y:0')
@@ -298,26 +297,28 @@ with tf.train.MonitoredSession() as sess:
         noisy_h_enc = tf.zeros(shape=(batch_size, enc_size + eta_dim))
         particles = tf.random_normal(shape=(batch_size, num_particles, dim_particle), stddev=1.0)
         for j in range(len(mini_batches)):
-            feed_dict = {x: sess.run(mini_batches[j])}
-            results = sess.run(fetches, feed_dict)
+            feed_dict_ = {x: sess.run(mini_batches[j])}
+            results = sess.run(fetches, feed_dict_)
             Lxs[i], Lzs[i], _ = results
             if i % 100 == 0:
                 print("iter=%d : Lx: %f Lz: %f" % (i, Lxs[i], Lzs[i]))
             for epoch in range(vae_svgd.num_epoch):
-                _, loss = sess.run([train_op, cost],
+                _, loss = sess.run([rec_model_train_op, cost],
                                    feed_dict={X: sess.run(noisy_h_enc),
                                               y: sess.run(particles)})
-                print("Epoch = {}, recognition model loss = {:.7f}".format
-                      (epoch + 1, 100. * loss))
+                if epoch // vae_svgd.num_epoch >= 1:
+                    print("Epoch = {}, recognition model loss = {:.7f}".format
+                          (epoch + 1, 100. * loss))
 
     # ******* TRAINING FINISHED ******* #
 
     sess.run(tf.global_variables_initializer())
     sess.run(tf.local_variables_initializer())
 
-    canvases = sess.run(cs, feed_dict)  # generate some examples
+    canvases = sess.run(cs, feed_dict_)  # generate some examples
     canvases = np.array(canvases)  # T x batch x img_size
 
+    print("Shapes", canvases.shape, len(Lxs), len(Lzs))
     out_file = os.path.join(FLAGS.data_dir, "adware_data.npy")
     np.save(out_file, [canvases, Lxs, Lzs])
     print("Outputs saved in file: %s" % out_file)
