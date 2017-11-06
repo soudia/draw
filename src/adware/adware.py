@@ -51,7 +51,7 @@ vae_svgd = VariationalEncSVGD(n_hidden=10, num_epoch=5)
 DO_SHARE = None  # workaround for variable_scope(reuse=True)
 
 x = tf.placeholder(tf.float32, shape=(batch_size, img_size))  # input (batch_size * img_size)
-seq_inputs = [tf.placeholder(tf.float32, shape=(batch_size, img_size)) for _ in xrange(T)]
+seq_inputs = [tf.placeholder(tf.float32, shape=(batch_size, img_size)) for _ in range(T)]
 e = tf.random_normal((batch_size, z_size), mean=0, stddev=1)  # Qsampler noise : TODO not needed
 lstm_enc = tf.contrib.rnn.LSTMCell(enc_size, state_is_tuple=True)  # encoder Op
 lstm_dec = tf.contrib.rnn.LSTMCell(dec_size, state_is_tuple=True)  # decoder Op
@@ -197,6 +197,9 @@ dec_state = lstm_dec.zero_state(batch_size, tf.float32)
 
 # ******** DRAW MODEL ******** #
 
+# ll = tf.ones(shape=(batch_size, img_size))
+
+
 # construct the unrolled computational graph
 for t in range(T):
     c_prev = tf.zeros((batch_size, img_size)) if t == 0 else cs[t-1]
@@ -209,6 +212,8 @@ for t in range(T):
     cs[t] = c_prev+write(h_dec)  # store results
     h_dec_prev = h_dec
     DO_SHARE = True  # from now on, share variables
+    # print(tf.equal(x, ll, name="vae_sampling/comparison"))
+    # ll = x
 
 
 # ******* LOSS FUNCTION ****** #
@@ -279,24 +284,23 @@ with tf.train.MonitoredSession() as sess:
     sess.run(tf.global_variables_initializer())
     threads = tf.train.start_queue_runners(sess=sess)
     xtrain = queue_reader.dequeue_many(T)  # TODO
-    print('xtrain', xtrain['inputs'])
+
+    train = sess.run(xtrain['inputs'])
+    train = sess.run(tf.reshape(train, shape=[-1, train.shape[3]]))
+    num_mini_batches = train.shape[0] // batch_size
+    mini_batches = tf.split(train, num_or_size_splits=num_mini_batches, axis=0)
 
     for i in range(train_iters):
         # xtrain, _ = train_data.next_batch(batch_size)  # xtrain is (batch_size x img_size)
         # train = sess.run(xtrain)
-        train = sess.run(xtrain['inputs'])
-        train = sess.run(tf.reshape(train, shape=[-1, train.shape[3]]))
-        num_mini_batches = train.shape[0] // batch_size
-        mini_batches = tf.split(train, num_or_size_splits=num_mini_batches, axis=0)
-
-        print(len(mini_batches))
 
         for j in range(len(mini_batches)):
             feed_dict_ = {x: sess.run(mini_batches[j])}
             results = sess.run(fetches, feed_dict_)
 
-            ops = sess.graph.get_operations()
-            all_train_ops = [m for m in ops if 'train_op_' in m.name]
+            # ops = sess.graph.get_operations()
+            # all_train_ops = [m for m in ops if 'train_op_' in m.name]
+            all_train_ops = [sess.graph.get_operation_by_name('vae_sampling/optimization_/train_op_')]
             mse = sess.graph.get_tensor_by_name('vae_sampling/metrics/mse:0')
             all_train_ops.append(mse)
 

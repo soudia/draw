@@ -70,12 +70,12 @@ class VariationalEncSVGD(SVGD):
             cost = tf.reduce_mean(tf.squared_difference(particles, yhat),
                                   name='mse')
 
-        with tf.name_scope("optimization_" + time_step):
+        with tf.variable_scope("optimization_", reuse=None):
             optimizer = tf.train.AdamOptimizer(learning_rate=self.stepsize,
                                                name=time_step)
             gradients = optimizer.compute_gradients(cost)
             train_op = optimizer.apply_gradients(gradients, global_step=None,
-                                                 name='train_op_' + time_step)
+                                                 name='train_op_')
 
         # noise = self._init_weights('noise', [h_enc.shape[0].value, eta_dim])
         # noisy_h_enc = tf.concat([h_enc, noise], axis=1)
