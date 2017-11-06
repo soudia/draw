@@ -33,9 +33,9 @@ write_n = 5  # write glimpse grid width/height
 read_size = 2*read_n*read_n if FLAGS.read_attn else 2*img_size
 write_size = write_n*write_n if FLAGS.write_attn else img_size
 z_size = 10  # QSampler output size TODO: Try bigger size for the latent code
-T = 1  # MNIST generation sequence length TODO when T > 1, vae_svgd breaks
+T = 10  # MNIST generation sequence length TODO when T > 1, vae_svgd breaks
 batch_size = 100  # training minibatch size
-train_iters = 20  # 10000
+train_iters = 8  # 10000
 learning_rate = 1e-3  # learning rate for optimizer
 eps = 1e-8  # epsilon for numerical stability
 
@@ -44,13 +44,14 @@ dim_particle = z_size  # dimension of a particle
 num_iter_stein = 10  # number of iterations for SVGD
 eta_dim = 2  # dimension of recognition noise model parameters
 
-vae_svgd = VariationalEncSVGD(n_hidden=10, num_epoch=1)
+vae_svgd = VariationalEncSVGD(n_hidden=10, num_epoch=5)
 
 # ******** BUILD MODEL ******* #
 
 DO_SHARE = None  # workaround for variable_scope(reuse=True)
 
 x = tf.placeholder(tf.float32, shape=(batch_size, img_size))  # input (batch_size * img_size)
+seq_inputs = [tf.placeholder(tf.float32, shape=(batch_size, img_size)) for _ in xrange(T)]
 e = tf.random_normal((batch_size, z_size), mean=0, stddev=1)  # Qsampler noise : TODO not needed
 lstm_enc = tf.contrib.rnn.LSTMCell(enc_size, state_is_tuple=True)  # encoder Op
 lstm_dec = tf.contrib.rnn.LSTMCell(dec_size, state_is_tuple=True)  # decoder Op
@@ -202,7 +203,7 @@ for t in range(T):
     x_hat = x - tf.sigmoid(c_prev)  # error image
     r = read(x, x_hat, h_dec_prev)
     h_enc, enc_state = encode(enc_state, tf.concat([r, h_dec_prev], 1))
-    z, mus[t], logsigmas[t], sigmas[t] = vae_sampleQ(h_enc, particles, str(t))
+    z, mus[t], logsigmas[t], sigmas[t] = vae_sampleQ(h_enc, particles, 10, str(t))
     # z, mus[t], logsigmas[t], sigmas[t] = sampleQ(h_enc)
     h_dec, dec_state = decode(dec_state, z)
     cs[t] = c_prev+write(h_dec)  # store results
@@ -277,30 +278,35 @@ with tf.train.MonitoredSession() as sess:
     sess.graph._unsafe_unfinalize()
     sess.run(tf.global_variables_initializer())
     threads = tf.train.start_queue_runners(sess=sess)
-    xtrain = queue_reader.dequeue_many(3)  # TODO
+    xtrain = queue_reader.dequeue_many(T)  # TODO
+    print('xtrain', xtrain['inputs'])
 
-    graph = tf.get_default_graph()
     for i in range(train_iters):
         # xtrain, _ = train_data.next_batch(batch_size)  # xtrain is (batch_size x img_size)
         # train = sess.run(xtrain)
         train = sess.run(xtrain['inputs'])
         train = sess.run(tf.reshape(train, shape=[-1, train.shape[3]]))
-
-        mse = graph.get_tensor_by_name('vae_sampling/metrics/mse:0')
-        vae_train_op = graph.get_operation_by_name('vae_sampling/optimization/train_op')
-
         num_mini_batches = train.shape[0] // batch_size
         mini_batches = tf.split(train, num_or_size_splits=num_mini_batches, axis=0)
+
+        print(len(mini_batches))
+
         for j in range(len(mini_batches)):
             feed_dict_ = {x: sess.run(mini_batches[j])}
             results = sess.run(fetches, feed_dict_)
+
+            ops = sess.graph.get_operations()
+            all_train_ops = [m for m in ops if 'train_op_' in m.name]
+            mse = sess.graph.get_tensor_by_name('vae_sampling/metrics/mse:0')
+            all_train_ops.append(mse)
+
             Lxs[i], Lzs[i], _ = results
             for epoch in range(vae_svgd.num_epoch):
-                _, loss = sess.run([vae_train_op, mse], feed_dict=feed_dict_)
-                if i % 100 == 0 and epoch % 100 == 0:
+                loss = sess.run(all_train_ops, feed_dict=feed_dict_)[-1]
+                if i % 100 == 0 and epoch % 3 == 0:
                     print("iter=%d - vae_iter=%d : Lx: %f Lz: %f rec. loss: %f"
                           % (i, epoch, Lxs[i], Lzs[i], loss))
-                # compare = graph.get_tensor_by_name('vae_sampling/comparison:0')
+                # compare = sess.graph.get_tensor_by_name('vae_sampling/comparison:0')
                 # print(sess.run(compare, feed_dict=feed_dict_))
 
     # ******* TRAINING FINISHED ******* #

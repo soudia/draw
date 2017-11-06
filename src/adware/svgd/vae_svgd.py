@@ -67,12 +67,15 @@ class VariationalEncSVGD(SVGD):
         yhat = self._forwardprop(noisy_h_enc, w_1, w_2)
 
         with tf.name_scope("metrics"):
-            cost = tf.reduce_mean(tf.squared_difference(particles, yhat), name='mse')
+            cost = tf.reduce_mean(tf.squared_difference(particles, yhat),
+                                  name='mse')
 
         with tf.name_scope("optimization_" + time_step):
-            optimizer = tf.train.AdamOptimizer(learning_rate=self.stepsize)
+            optimizer = tf.train.AdamOptimizer(learning_rate=self.stepsize,
+                                               name=time_step)
             gradients = optimizer.compute_gradients(cost)
-            train_op = optimizer.apply_gradients(gradients, global_step=None, name='train_op')
+            train_op = optimizer.apply_gradients(gradients, global_step=None,
+                                                 name='train_op_' + time_step)
 
         # noise = self._init_weights('noise', [h_enc.shape[0].value, eta_dim])
         # noisy_h_enc = tf.concat([h_enc, noise], axis=1)
@@ -95,7 +98,6 @@ class VariationalEncSVGD(SVGD):
             particles = tf.tensordot(particles, w_2, axes=[[1], [0]])
             particles = self.update(particles, gradients, num_iter)
 
-        # TODO Compute the mean, the logsigma, and the stdev
         return particles, train_op
 
 
@@ -104,7 +106,7 @@ if __name__ == '__main__':
     particles_ = tf.random_normal(shape=(x_1.shape[0].value,
                                          10, 5), stddev=1.0)
     vae_svgd = VariationalEncSVGD()
-    vae_svgd.recognition_model(x_1, particles_, 2)
+    vae_svgd.recognition_model(x_1, particles_, 2, 2)
     # with tf.Session() as sess:
     #     x_1 = tf.random_normal([4, 3], stddev=0.01)
     #     sess.run(tf.global_variables_initializer())
