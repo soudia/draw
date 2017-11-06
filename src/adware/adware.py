@@ -35,7 +35,7 @@ write_size = write_n*write_n if FLAGS.write_attn else img_size
 z_size = 10  # QSampler output size TODO: Try bigger size for the latent code
 T = 10  # MNIST generation sequence length TODO when T > 1, vae_svgd breaks
 batch_size = 100  # training minibatch size
-train_iters = 8  # 10000
+train_iters = 100  # 10000
 learning_rate = 1e-3  # learning rate for optimizer
 eps = 1e-8  # epsilon for numerical stability
 
@@ -156,7 +156,7 @@ def vae_sampleQ(h_enc, particles, iter, time_step):
     with tf.variable_scope("moments", reuse=DO_SHARE):
         mu, sigma = tf.nn.moments(particles, axes=[1])
         logsigma = tf.log(sigma)
-    return (mu + sigma*e, mu, logsigma, sigma)  # TODO
+    return (mu + sigma*e, mu, logsigma, sigma)  # TODO: This would change.
 
 
 # ******* DECODER ****** #
@@ -282,7 +282,9 @@ queue_reader = QueueReader(data_dir=data_directory, batch_size=batch_size, z_dim
 with tf.train.MonitoredSession() as sess:
     sess.graph._unsafe_unfinalize()
     sess.run(tf.global_variables_initializer())
-    threads = tf.train.start_queue_runners(sess=sess)
+
+    coord = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(sess=sess, coord=coord)
     xtrain = queue_reader.dequeue_many(T)  # TODO
 
     train = sess.run(xtrain['inputs'])
@@ -298,9 +300,7 @@ with tf.train.MonitoredSession() as sess:
             feed_dict_ = {x: sess.run(mini_batches[j])}
             results = sess.run(fetches, feed_dict_)
 
-            # ops = sess.graph.get_operations()
-            # all_train_ops = [m for m in ops if 'train_op_' in m.name]
-            all_train_ops = [sess.graph.get_operation_by_name('vae_sampling/optimization_/train_op_')]
+            all_train_ops = [sess.graph.get_operation_by_name('vae_sampling/optimization/train_op')]
             mse = sess.graph.get_tensor_by_name('vae_sampling/metrics/mse:0')
             all_train_ops.append(mse)
 
@@ -314,9 +314,8 @@ with tf.train.MonitoredSession() as sess:
                 # print(sess.run(compare, feed_dict=feed_dict_))
 
     # ******* TRAINING FINISHED ******* #
-
-    sess.run(tf.global_variables_initializer())
-    sess.run(tf.local_variables_initializer())
+    coord.request_stop()
+    coord.join(threads)
 
     canvases = sess.run(cs, feed_dict_)  # generate some examples
     canvases = np.array(canvases)  # T x batch x img_size

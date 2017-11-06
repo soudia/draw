@@ -18,6 +18,9 @@ class QueueReader(object):
         # sess.run(tf.global_variables_initializer())
         # sess.run(tf.local_variables_initializer())
 
+    def size(self):
+        return self.queue.size
+
     def dequeue_many(self, num_elements):
         '''
         :param num_elements: number of items to be dequeued
