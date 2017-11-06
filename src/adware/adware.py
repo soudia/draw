@@ -14,6 +14,7 @@ from tensorflow.examples.tutorials import mnist
 from utils.queue_reader import QueueReader
 import numpy as np
 import os
+from time import time
 
 from svgd.vae_svgd import VariationalEncSVGD
 
@@ -292,6 +293,7 @@ with tf.train.MonitoredSession() as sess:
     num_mini_batches = train.shape[0] // batch_size
     mini_batches = tf.split(train, num_or_size_splits=num_mini_batches, axis=0)
 
+    start_time = time()
     for i in range(train_iters):
         # xtrain, _ = train_data.next_batch(batch_size)  # xtrain is (batch_size x img_size)
         # train = sess.run(xtrain)
@@ -326,3 +328,5 @@ with tf.train.MonitoredSession() as sess:
 
     ckpt_file = os.path.join(FLAGS.data_dir, "adwaremodel.ckpt")
     print("Model saved in file: %s" % saver.save(get_session(sess), ckpt_file))
+    seconds = int(round(time() - start_time))
+    print('End', seconds)
